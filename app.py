@@ -1,93 +1,37 @@
-import os
-import json
-from PIL import Image
-from io import BytesIO
-import requests
-import zipfile
-import re
 from flask import Flask, request, jsonify, send_file
-import openai
-from urllib.parse import quote as url_quote  # 新しいurl_quoteの代替コード
+from lp_generator import create_lp
+import os
 
-# 環境変数からAPIキーを取得
-openai.api_key = os.getenv('OPENAI_API_KEY')
-
-# Flaskアプリケーションの初期化
 app = Flask(__name__)
 
-# ケバブケース変換関数
-def convert_to_kebab_case(text, max_length=20):
-    """文字列をケバブケースに変換し、20文字以内に制限"""
-    kebab_case_text = re.sub(r'\s+', '-', text.lower())
-    kebab_case_text = re.sub(r'[^a-z0-9\-]', '', kebab_case_text)  # 英数字とハイフンのみ許可
-    return kebab_case_text[:max_length]  # 20文字以内に切り捨て
+@app.route('/generate_lp', methods=['POST'])
+def generate_lp_endpoint():
+    try:
+        data = request.get_json()
 
-@app.route('/generate-image', methods=['POST'])
-def generate_image():
-    """ChatGPTのプロンプトから画像を生成し、ZIPファイルでダウンロードリンクを提供"""
-    data = request.json
-    prompt = data['prompt']
-    
-    # アスペクト比とピクセルサイズの処理
-    size = data.get('size')
-    aspect_ratio = data.get('aspect_ratio')
-    
-    # デフォルトの幅を設定（例：1024ピクセル）
-    default_width = 1024
-    
-    if aspect_ratio:
-        # アスペクト比を解析して幅と高さを計算
-        width_ratio, height_ratio = map(float, aspect_ratio.split(':'))
-        height = int(default_width * (height_ratio / width_ratio))
-        size = f"{default_width}x{height}"
-    elif not size:
-        # サイズが指定されていない場合、デフォルトサイズを使用
-        size = '1024x1024'
-    
-    # 生成する画像の枚数を取得（デフォルト1、最大10）
-    n = data.get('n', 1)
-    n = min(n, 10)  # 最大10枚まで生成可能
-    
-    # DALL·E APIを呼び出して複数のWebP形式の画像を生成
-    headers = {'Authorization': f'Bearer {openai.api_key}', 'Content-Type': 'application/json'}
-    response = requests.post(
-        'https://api.dalle.openai.com/v1/images/generate',
-        headers=headers,
-        json={'prompt': prompt, 'n': n, 'size': size}
-    )
-    
-    # 生成された画像のURLリストを取得
-    data = response.json()
-    image_urls = [item['url'] for item in data['data']]
-    
-    # プロンプトからケバブケースのファイル名を生成（20文字以内）
-    base_filename = convert_to_kebab_case(prompt)
-    
-    # 画像をPNGに変換してZIPにまとめる
-    zip_filename = f"{base_filename}.zip"
-    zip_path = os.path.join("/tmp", zip_filename)  # /tmpに一時的に保存
-    with zipfile.ZipFile(zip_path, 'w') as zipf:
-        for i, url in enumerate(image_urls):
-            webp_image = requests.get(url)
-            img_webp = Image.open(BytesIO(webp_image.content))
-            png_buffer = BytesIO()
-            img_webp.save(png_buffer, format="PNG")
-            png_buffer.seek(0)
-            # 各画像をPNGファイルとしてZIPに書き込む
-            filename = f'{base_filename}-{i+1}.png'  # ケバブケース名 + インデックス
-            zipf.writestr(filename, png_buffer.getvalue())
-    
-    # ZIPファイルのダウンロードリンクを返す
-    return jsonify({'zip_url': f'/download/{zip_filename}'})
+        # 必要なデータを取得
+        company_info = data['company_info']
+        sections = data['sections']
+        image_prompts = data['image_prompts']
+        css_config = data['css_config']
 
-@app.route('/download/<filename>', methods=['GET'])
-def download_file(filename):
-    """生成されたZIPファイルをダウンロードするエンドポイント"""
-    file_path = os.path.join("/tmp", filename)
-    if os.path.exists(file_path):
-        return send_file(file_path, as_attachment=True)
-    else:
-        return jsonify({"error": "File not found"}), 404
+        # Render の /tmp フォルダに一時的に保存
+        base_dir = '/tmp/lp_structure'
+
+        # LP生成
+        zip_file_path = create_lp(base_dir, company_info, sections, image_prompts, css_config)
+
+        if not zip_file_path:
+            return jsonify({'error': 'LP作成に失敗しました。'}), 500
+
+        # 生成された ZIP ファイルを返す
+        return send_file(zip_file_path, as_attachment=True)
+
+    except KeyError as e:
+        return jsonify({'error': f"欠けているキー: {e}"}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True)
