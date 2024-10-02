@@ -180,20 +180,27 @@ def generate_lp_endpoint():
     try:
         data = request.get_json()
 
-        # 必要なデータを取得
-        company_info = data['company_info']
-        sections = data['sections']
-        image_prompts = data['image_prompts']
-        css_config = data['css_config']
-        base_dir = '/tmp/lp_structure'
+        # リクエストデータからテキストを取得
+        request_text = data.get('text', '')
 
-        # LP生成
-        zip_file_path = create_lp(base_dir, company_info, sections, image_prompts, css_config)
+        # キーワードをチェック
+        if "LPを作ってください" in request_text:
+            # 必要なデータを取得
+            company_info = data['company_info']
+            sections = data['sections']
+            image_prompts = data['image_prompts']
+            css_config = data['css_config']
+            base_dir = '/tmp/lp_structure'
 
-        if not zip_file_path:
-            return jsonify({'error': 'LP作成に失敗しました。'}), 500
+            # LP生成
+            zip_file_path = create_lp(base_dir, company_info, sections, image_prompts, css_config)
 
-        return send_file(zip_file_path, as_attachment=True)
+            if not zip_file_path:
+                return jsonify({'error': 'LP作成に失敗しました。'}), 500
+
+            return send_file(zip_file_path, as_attachment=True)
+
+        return jsonify({'error': '無効なリクエストです。'}), 400
 
     except KeyError as e:
         return jsonify({'error': f"欠けているキー: {e}"}), 400
