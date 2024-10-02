@@ -6,31 +6,25 @@ import requests
 import zipfile
 import re
 from flask import Flask, request, jsonify, send_file
-import os
 import openai
-# 新コード (代替コード)
-from urllib.parse import quote as url_quote
+from urllib.parse import quote as url_quote  # 新しいurl_quoteの代替コード
 
 # 環境変数からAPIキーを取得
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
-response = openai.Completion.create(
-  model="text-davinci-003",
-  prompt="Translate the following English text to French: 'Hello, how are you?'",
-  temperature=0.5,
-  max_tokens=60
-)
-
+# Flaskアプリケーションの初期化
 app = Flask(__name__)
 
 # ケバブケース変換関数
 def convert_to_kebab_case(text, max_length=20):
+    """文字列をケバブケースに変換し、20文字以内に制限"""
     kebab_case_text = re.sub(r'\s+', '-', text.lower())
     kebab_case_text = re.sub(r'[^a-z0-9\-]', '', kebab_case_text)  # 英数字とハイフンのみ許可
     return kebab_case_text[:max_length]  # 20文字以内に切り捨て
 
 @app.route('/generate-image', methods=['POST'])
 def generate_image():
+    """ChatGPTのプロンプトから画像を生成し、ZIPファイルでダウンロードリンクを提供"""
     data = request.json
     prompt = data['prompt']
     
@@ -52,12 +46,10 @@ def generate_image():
     
     # 生成する画像の枚数を取得（デフォルト1、最大10）
     n = data.get('n', 1)
-    if n > 10:
-        n = 10  # 最大10枚まで生成可能
+    n = min(n, 10)  # 最大10枚まで生成可能
     
     # DALL·E APIを呼び出して複数のWebP形式の画像を生成
-    api_key = 'YOUR_DALLE_API_KEY'  # OpenAIから取得したAPIキー
-    headers = {'Authorization': f'Bearer {api_key}', 'Content-Type': 'application/json'}
+    headers = {'Authorization': f'Bearer {openai.api_key}', 'Content-Type': 'application/json'}
     response = requests.post(
         'https://api.dalle.openai.com/v1/images/generate',
         headers=headers,
@@ -85,10 +77,12 @@ def generate_image():
             filename = f'{base_filename}-{i+1}.png'  # ケバブケース名 + インデックス
             zipf.writestr(filename, png_buffer.getvalue())
     
+    # ZIPファイルのダウンロードリンクを返す
     return jsonify({'zip_url': f'/download/{zip_filename}'})
 
 @app.route('/download/<filename>', methods=['GET'])
 def download_file(filename):
+    """生成されたZIPファイルをダウンロードするエンドポイント"""
     file_path = os.path.join("/tmp", filename)
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True)
