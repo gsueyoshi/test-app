@@ -137,29 +137,39 @@ def create_zip(base_dir: str) -> str:
                 zipf.write(file_path, os.path.relpath(file_path, base_dir))
     return zip_file_path
 
-def create_lp_structure(base_dir: str, html_content: str, css_files: Dict[str, str], img_files: Dict[str, str]) -> str:
+def create_lp(base_dir: str, company_info: Dict, sections: List[Dict], image_prompts: List[Dict], css_config: Dict) -> str:
     """
-    LPのファイル構造を作成し、指定されたディレクトリに保存後、ZIPファイルを作成します。
+    LPを作成し、ZIPファイルとして出力します。
 
     Parameters:
         base_dir (str): 保存先のベースディレクトリ。
-        html_content (str): 生成するHTMLコンテンツ。
-        css_files (Dict[str, str]): CSSファイル名とその内容。
-        img_files (Dict[str, str]): 画像ファイルのソースパスと保存先のファイル名。
+        company_info (Dict): 企業情報。
+        sections (List[Dict]): セクション情報のリスト。
+        image_prompts (List[Dict]): 画像生成プロンプトのリスト。
+        css_config (Dict): CSS設定。
 
     Returns:
         str: 作成されたZIPファイルのパス。
     """
     try:
-        # ディレクトリ構造作成
-        create_directory_structure(base_dir, ['css', 'img'])
+        # 画像生成
+        generated_image_paths = generate_images(image_prompts)
 
-        # ファイル保存
-        save_files(base_dir, html_content, css_files, img_files)
+        # HTMLコンテンツの生成（ここで、テンプレートエンジンや手動でHTMLを作成）
+        html_content = render_template('index.html', company_info=company_info, sections=sections)
 
-        # ZIPファイル作成
-        return create_zip(base_dir)
+        # CSSファイルの作成
+        css_files = {
+            'reset.css': "/* リセットCSS */\n* { margin: 0; padding: 0; box-sizing: border-box; }",
+            'style.css': f"/* スタイルCSS */\nbody {{ font-family: {css_config['font_family']}; background-color: #ffffff; }}"
+        }
+
+        # 生成された画像とHTML/CSSを元にLP構造を作成
+        img_files = {generated_image_paths[i]: f'image_{i + 1}.png' for i in range(len(generated_image_paths))}
+
+        # LPのファイル構造を作成し、ZIPファイルにまとめる
+        return create_lp_structure(base_dir, html_content, css_files, img_files)
 
     except Exception as e:
-        print(f"フォルダ構造の作成中にエラーが発生しました: {e}")
+        print(f"LP作成中にエラーが発生しました: {e}")
         return ""
