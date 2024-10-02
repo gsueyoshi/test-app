@@ -8,6 +8,8 @@ import re
 from flask import Flask, request, jsonify, send_file
 import os
 import openai
+# 新コード (代替コード)
+from urllib.parse import quote as url_quote
 
 # 環境変数からAPIキーを取得
 openai.api_key = os.getenv('OPENAI_API_KEY')
