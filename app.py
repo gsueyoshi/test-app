@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, render_template  # render_template を追加
 from lp_generator import create_lp
 
 app = Flask(__name__)
