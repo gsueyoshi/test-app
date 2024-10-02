@@ -12,13 +12,19 @@ def handle_errors(f):
         except KeyError as e:
             return jsonify({'error': f"欠けているキー: {e}"}), 400
         except Exception as e:
-            return jsonify({'error': str(e)}), 400
+            return jsonify({'error': str(e)}), 500  # 500エラーに変更
     wrapper.__name__ = f.__name__
     return wrapper
+
+@app.route('/')
+def home():
+    """ルートエンドポイント"""
+    return "Welcome to the ChatGPT to Image and LP Generation API!"
 
 @app.route('/generate_lp', methods=['POST'])
 @handle_errors
 def generate_lp_endpoint():
+    """LPを生成するエンドポイント"""
     data = request.get_json()
 
     # 必要なデータを取得
@@ -39,7 +45,7 @@ def generate_lp_endpoint():
 @app.route('/submit_json', methods=['POST'])
 @handle_errors
 def submit_json():
-    # JSONデータを受け取り、company_infoを作成
+    """JSONデータを受け取り、会社情報を作成するエンドポイント"""
     data = request.get_json()
     company_info = {
         'name': data.get('name'),
