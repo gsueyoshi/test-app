@@ -27,6 +27,10 @@ def generate_lp_endpoint():
         return jsonify({'error': f"欠けているキー: {e}"}), 400
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+    
+@app.route('/')
+def index():
+    return render_template('index.html')  # templatesディレクトリのindex.htmlを返す
 
 if __name__ == '__main__':
     app.run(debug=True)
