@@ -1,36 +1,57 @@
-from flask import Flask, request, jsonify, send_file, render_template  # render_template を追加
+from flask import Flask, request, jsonify, send_file, render_template
 from lp_generator import create_lp
+import os
 
 app = Flask(__name__)
 
+# 共通のエラーハンドリング
+def handle_errors(f):
+    def wrapper(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except KeyError as e:
+            return jsonify({'error': f"欠けているキー: {e}"}), 400
+        except Exception as e:
+            return jsonify({'error': str(e)}), 400
+    wrapper.__name__ = f.__name__
+    return wrapper
+
 @app.route('/generate_lp', methods=['POST'])
+@handle_errors
 def generate_lp_endpoint():
-    try:
-        data = request.get_json()
+    data = request.get_json()
 
-        # 必要なデータを取得
-        company_info = data['company_info']
-        sections = data['sections']
-        image_prompts = data['image_prompts']
-        css_config = data['css_config']
-        base_dir = '/tmp/lp_structure'
+    # 必要なデータを取得
+    company_info = data.get('company_info')
+    sections = data.get('sections')
+    image_prompts = data.get('image_prompts')
+    css_config = data.get('css_config')
+    base_dir = '/tmp/lp_structure'
 
-        # LP生成
-        zip_file_path = create_lp(base_dir, company_info, sections, image_prompts, css_config)
+    # LP生成
+    zip_file_path = create_lp(base_dir, company_info, sections, image_prompts, css_config)
 
-        if not zip_file_path:
-            return jsonify({'error': 'LP作成に失敗しました。'}), 500
+    if not zip_file_path:
+        return jsonify({'error': 'LP作成に失敗しました。'}), 500
 
-        return send_file(zip_file_path, as_attachment=True)
+    return send_file(zip_file_path, as_attachment=True)
 
-    except KeyError as e:
-        return jsonify({'error': f"欠けているキー: {e}"}), 400
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
-    
-@app.route('/')
-def index():
-    return render_template('index.html')  # templatesディレクトリのindex.htmlを返す
+@app.route('/submit_json', methods=['POST'])
+@handle_errors
+def submit_json():
+    # JSONデータを受け取り、company_infoを作成
+    data = request.get_json()
+    company_info = {
+        'name': data.get('name'),
+        'description': data.get('description'),
+        'tel': data.get('tel'),
+        'hours': data.get('hours'),
+        'holidays': data.get('holidays'),
+        'address': data.get('address')
+    }
+
+    # テンプレートに company_info を渡して表示
+    return render_template('index.html', company_info=company_info)
 
 if __name__ == '__main__':
     app.run(debug=True)
