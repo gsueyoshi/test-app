@@ -19,41 +19,42 @@ openai.api_key = get_openai_api_key()
 
 app = Flask(__name__)
 
-def download_image_from_url(url: str) -> Image.Image:
-    """指定されたURLから画像をダウンロードしてPILのImageオブジェクトを返します。"""
+# ダウンロードした画像を/tmpフォルダに保存
+def download_image_from_url(url: str, filename: str) -> str:
+    """指定されたURLから画像をダウンロードし、/tmpに保存してパスを返します。"""
     try:
         img_data = requests.get(url).content
-        return Image.open(BytesIO(img_data))
+        img_path = os.path.join('/tmp', filename)
+        with open(img_path, 'wb') as f:
+            f.write(img_data)
+        return img_path
     except Exception as e:
         print(f"画像のダウンロード中にエラーが発生しました: {e}")
-        return Image.new('RGB', (1024, 1024), color=(200, 200, 200))  # デフォルト画像を返す
+        return None
 
-def generate_image(prompt: str, size: str = "1024x1024", aspect_ratio: Optional[str] = None) -> Image.Image:
+def generate_image(prompt: str, size: str = "1024x1024", aspect_ratio: Optional[str] = None, filename_prefix: str = "image") -> str:
     """
-    OpenAIのDALL-E APIを使用して画像を生成します。
+    OpenAIのDALL-E APIを使用して画像を生成し、/tmpに保存します。
 
     Parameters:
         prompt (str): 画像生成のためのテキストプロンプト。
         size (str, optional): 画像のサイズ（デフォルトは"1024x1024"）。
         aspect_ratio (str, optional): アスペクト比（例："16:9"）。指定された場合、サイズを調整。
+        filename_prefix (str): 生成された画像のファイル名のプレフィックス。
 
     Returns:
-        Image.Image: 生成されたPIL Imageオブジェクト。
+        str: 生成された画像ファイルのパス。
     """
     try:
         response = openai.Image.create(prompt=prompt, n=1, size=size)
         image_url = response['data'][0]['url']
-        image = download_image_from_url(image_url)
+        filename = f"{filename_prefix}.png"
+        image_path = download_image_from_url(image_url, filename)
 
-        if aspect_ratio:
-            aspect_width, aspect_height = map(int, aspect_ratio.split(':'))
-            new_height = int((aspect_height / aspect_width) * image.width)
-            image = image.resize((image.width, new_height))
-
-        return image
+        return image_path
     except Exception as e:
         print(f"画像生成中にエラーが発生しました: {e}")
-        return Image.new('RGB', (1024, 1024), color=(200, 200, 200))  # エラー時のデフォルト画像
+        return None
 
 def validate_image_count(count: int):
     """画像の枚数が1〜10の範囲内か確認します。"""
@@ -71,9 +72,6 @@ def generate_images(prompts: List[Dict]) -> List[str]:
         List[str]: 生成された画像ファイルのパスのリスト。
     """
     generated_image_paths = []
-    img_folder = 'generated_images'
-    os.makedirs(img_folder, exist_ok=True)
-
     for prompt_info in prompts:
         prompt = prompt_info['prompt']
         size = prompt_info.get('size', "1024x1024")
@@ -84,26 +82,18 @@ def generate_images(prompts: List[Dict]) -> List[str]:
         validate_image_count(count)
 
         for i in range(count):
-            image = generate_image(prompt, size, aspect_ratio)
-            image_filename = f"{filename_prefix}_{i + 1}.png"
-            image_path = os.path.join(img_folder, image_filename)
-            image.save(image_path)
-            generated_image_paths.append(image_path)
+            image_path = generate_image(prompt, size, aspect_ratio, f"{filename_prefix}_{i + 1}")
+            if image_path:
+                generated_image_paths.append(image_path)
 
     return generated_image_paths
-
-def create_directory_structure(base_dir: str, subdirs: List[str]):
-    """指定されたディレクトリとサブディレクトリを作成します。"""
-    os.makedirs(base_dir, exist_ok=True)
-    for subdir in subdirs:
-        os.makedirs(os.path.join(base_dir, subdir), exist_ok=True)
 
 def save_files(base_dir: str, html_content: str, css_files: Dict[str, str], img_files: Dict[str, str]):
     """
     HTML、CSS、画像ファイルを指定されたディレクトリに保存します。
 
     Parameters:
-        base_dir (str): 保存先のベースディレクトリ。
+        base_dir (str): 保存先のベースディレクトリ（/tmp）。
         html_content (str): HTMLコンテンツ。
         css_files (Dict[str, str]): CSSファイル名とその内容。
         img_files (Dict[str, str]): 画像ファイルのソースパスと保存先のファイル名。
@@ -126,7 +116,7 @@ def create_zip(base_dir: str) -> str:
     指定されたディレクトリをZIPファイルとして圧縮します。
 
     Parameters:
-        base_dir (str): 圧縮するディレクトリ。
+        base_dir (str): 圧縮するディレクトリ（/tmp）。
 
     Returns:
         str: 圧縮されたZIPファイルのパス。
@@ -144,7 +134,7 @@ def create_lp(base_dir: str, company_info: Dict, sections: List[Dict], image_pro
     LPを作成し、ZIPファイルとして出力します。
 
     Parameters:
-        base_dir (str): 保存先のベースディレクトリ。
+        base_dir (str): 保存先のベースディレクトリ（/tmp）。
         company_info (Dict): 企業情報。
         sections (List[Dict]): セクション情報のリスト。
         image_prompts (List[Dict]): 画像生成プロンプトのリスト。
@@ -157,7 +147,7 @@ def create_lp(base_dir: str, company_info: Dict, sections: List[Dict], image_pro
         # 画像生成
         generated_image_paths = generate_images(image_prompts)
 
-        # HTMLコンテンツの生成（ここで、テンプレートエンジンや手動でHTMLを作成）
+        # HTMLコンテンツの生成（テンプレートエンジンや手動でHTMLを作成）
         html_content = render_template('index.html', company_info=company_info, sections=sections)
 
         # CSSファイルの作成
@@ -169,8 +159,15 @@ def create_lp(base_dir: str, company_info: Dict, sections: List[Dict], image_pro
         # 生成された画像とHTML/CSSを元にLP構造を作成
         img_files = {generated_image_paths[i]: f'image_{i + 1}.png' for i in range(len(generated_image_paths))}
 
-        # LPのファイル構造を作成し、ZIPファイルにまとめる
-        return create_lp_structure(base_dir, html_content, css_files, img_files)
+        # ディレクトリ構造を作成
+        os.makedirs(os.path.join(base_dir, 'css'), exist_ok=True)
+        os.makedirs(os.path.join(base_dir, 'img'), exist_ok=True)
+
+        # ファイルを保存
+        save_files(base_dir, html_content, css_files, img_files)
+
+        # ZIPファイルを作成
+        return create_zip(base_dir)
 
     except Exception as e:
         print(f"LP作成中にエラーが発生しました: {e}")
