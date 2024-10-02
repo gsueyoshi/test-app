@@ -17,6 +17,8 @@ def get_openai_api_key():
 
 openai.api_key = get_openai_api_key()
 
+app = Flask(__name__)
+
 def download_image_from_url(url: str) -> Image.Image:
     """指定されたURLから画像をダウンロードしてPILのImageオブジェクトを返します。"""
     try:
@@ -173,3 +175,48 @@ def create_lp(base_dir: str, company_info: Dict, sections: List[Dict], image_pro
     except Exception as e:
         print(f"LP作成中にエラーが発生しました: {e}")
         return ""
+
+# Flaskルート
+@app.route('/generate_lp', methods=['POST'])
+def generate_lp_endpoint():
+    try:
+        data = request.get_json()
+
+        # 必要なデータを取得
+        company_info = data['company_info']
+        sections = data['sections']
+        image_prompts = data['image_prompts']
+        css_config = data['css_config']
+        base_dir = '/tmp/lp_structure'
+
+        # LP生成
+        zip_file_path = create_lp(base_dir, company_info, sections, image_prompts, css_config)
+
+        if not zip_file_path:
+            return jsonify({'error': 'LP作成に失敗しました。'}), 500
+
+        return send_file(zip_file_path, as_attachment=True)
+
+    except KeyError as e:
+        return jsonify({'error': f"欠けているキー: {e}"}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/submit_json', methods=['POST'])
+def submit_json():
+    # JSONデータを受け取り、company_infoを作成
+    data = request.get_json()
+    company_info = {
+        'name': data.get('name'),
+        'description': data.get('description'),
+        'tel': data.get('tel'),
+        'hours': data.get('hours'),
+        'holidays': data.get('holidays'),
+        'address': data.get('address')
+    }
+
+    # テンプレートに company_info を渡して表示
+    return render_template('index.html', company_info=company_info)
+
+if __name__ == '__main__':
+    app.run(debug=True)
