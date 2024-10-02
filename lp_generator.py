@@ -57,9 +57,9 @@ def generate_image(prompt: str, size: str = "1024x1024", aspect_ratio: Optional[
         return None
 
 def validate_image_count(count: int):
-    """画像の枚数が1〜10の範囲内か確認します。"""
-    if not (1 <= count <= 10):
-        raise ValueError(f"画像の枚数は1から10の間で指定してください。現在の値: {count}")
+    """画像の枚数が0〜10の範囲内か確認します。"""
+    if not (0 <= count <= 10):
+        raise ValueError(f"画像の枚数は0から10の間で指定してください。現在の値: {count}")
 
 def generate_images(prompts: List[Dict]) -> List[str]:
     """
@@ -80,6 +80,10 @@ def generate_images(prompts: List[Dict]) -> List[str]:
         filename_prefix = prompt_info['filename_prefix']
 
         validate_image_count(count)
+
+        # 0の場合はスキップ
+        if count == 0:
+            continue
 
         for i in range(count):
             image_path = generate_image(prompt, size, aspect_ratio, f"{filename_prefix}_{i + 1}")
@@ -103,11 +107,13 @@ def save_files(base_dir: str, html_content: str, css_files: Dict[str, str], img_
         f.write(html_content)
 
     # CSSファイル保存
+    os.makedirs(os.path.join(base_dir, 'css'), exist_ok=True)
     for file_name, content in css_files.items():
         with open(os.path.join(base_dir, 'css', file_name), 'w', encoding='utf-8') as f:
             f.write(content)
 
     # 画像ファイル保存
+    os.makedirs(os.path.join(base_dir, 'img'), exist_ok=True)
     for src, dest in img_files.items():
         shutil.move(src, os.path.join(base_dir, 'img', dest))
 
@@ -122,11 +128,7 @@ def create_zip(base_dir: str) -> str:
         str: 圧縮されたZIPファイルのパス。
     """
     zip_file_path = f'{base_dir}.zip'
-    with zipfile.ZipFile(zip_file_path, 'w') as zipf:
-        for root, _, files in os.walk(base_dir):
-            for file in files:
-                file_path = os.path.join(root, file)
-                zipf.write(file_path, os.path.relpath(file_path, base_dir))
+    shutil.make_archive(zip_file_path.replace(".zip", ""), 'zip', base_dir)
     return zip_file_path
 
 def create_lp(base_dir: str, company_info: Dict, sections: List[Dict], image_prompts: List[Dict], css_config: Dict) -> str:
@@ -160,8 +162,7 @@ def create_lp(base_dir: str, company_info: Dict, sections: List[Dict], image_pro
         img_files = {generated_image_paths[i]: f'image_{i + 1}.png' for i in range(len(generated_image_paths))}
 
         # ディレクトリ構造を作成
-        os.makedirs(os.path.join(base_dir, 'css'), exist_ok=True)
-        os.makedirs(os.path.join(base_dir, 'img'), exist_ok=True)
+        os.makedirs(base_dir, exist_ok=True)
 
         # ファイルを保存
         save_files(base_dir, html_content, css_files, img_files)
