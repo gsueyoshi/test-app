@@ -1,6 +1,6 @@
 import os
 import zipfile
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, jsonify, send_file, render_template
 from io import BytesIO
 from PIL import Image
 import boto3
