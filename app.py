@@ -71,7 +71,9 @@ def generate_images_from_prompts(prompts, n=1, size="1024x1024"):
         raise Exception(f"Error generating images: {str(e)}")
 
 def create_zip_and_upload_to_s3(image_urls, frontend_files, company_info):
+    """Create a ZIP file from a list of image paths and upload it to S3, ensuring the same file names are used in HTML and the ZIP."""
     zip_buffer = BytesIO()
+    image_filenames = []  # 画像ファイル名を保存するリスト
     try:
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
             # 生成された画像を追加
@@ -79,16 +81,26 @@ def create_zip_and_upload_to_s3(image_urls, frontend_files, company_info):
                 response = requests.get(url)
                 img = Image.open(BytesIO(response.content))
                 kebab_file_name = convert_to_kebab_case(f"generated_image_{idx+1}")
+                image_filenames.append(kebab_file_name + ".png")  # ファイル名を保存
                 img_buffer = BytesIO()
                 img.save(img_buffer, format="PNG")
                 img_buffer.seek(0)
                 zf.writestr(f"static/img/{kebab_file_name}.png", img_buffer.getvalue())
 
             # フロントエンドファイルを追加
-            zf.writestr("index.html", frontend_files['html'])
-            zf.writestr("static/css/styles.css", frontend_files['css'])
-            zf.writestr("static/js/scripts.js", frontend_files['js'])
-            zf.writestr("static/php/functions.php", frontend_files['php'])
+            html_content = frontend_files['html']
+            css_content = frontend_files['css']
+            js_content = frontend_files['js']
+            php_content = frontend_files['php']
+
+            # HTML内の画像参照ファイル名を修正
+            for idx, filename in enumerate(image_filenames):
+                html_content = html_content.replace(f"image_placeholder_{idx+1}.png", filename)
+
+            zf.writestr("index.html", html_content)
+            zf.writestr("static/css/styles.css", css_content)
+            zf.writestr("static/js/scripts.js", js_content)
+            zf.writestr("static/php/functions.php", php_content)
 
             # 会社情報ファイルを追加
             company_info_str = f"Company Name: {company_info['name']}\nDescription: {company_info['description']}"
@@ -101,6 +113,7 @@ def create_zip_and_upload_to_s3(image_urls, frontend_files, company_info):
         return f"s3://{S3_BUCKET_NAME}/{s3_file_name}"
     except Exception as e:
         raise Exception(f"Error creating ZIP file: {str(e)}")
+
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
