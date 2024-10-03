@@ -28,4 +28,4 @@ Werkzeug==3.0.4
 boto3==1.35.31
 marshmallow==3.19.0
 celery==5.4.0
-redis==7.4.6
+redis==5.1.0
