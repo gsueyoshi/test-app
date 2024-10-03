@@ -10,7 +10,7 @@ import openai
 
 app = Flask(__name__)
 
-# OpenAI APIキーの設定
+# 環境変数から設定
 openai.api_key = os.getenv('OPENAI_API_KEY')
 if not openai.api_key:
     raise EnvironmentError("OPENAI_API_KEY is not set in environment variables.")
@@ -24,6 +24,7 @@ s3 = boto3.client(
 )
 if not all([os.getenv('AWS_ACCESS_KEY_ID'), os.getenv('AWS_SECRET_ACCESS'), os.getenv('AWS_REGION')]):
     raise EnvironmentError("AWS credentials are not set in environment variables.")
+
 S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME')
 if not S3_BUCKET_NAME:
     raise EnvironmentError("S3_BUCKET_NAME is not set in environment variables.")
@@ -39,21 +40,16 @@ def generate_images_from_prompts(prompts, n=1, size="1024x1024"):
     image_urls = []
     try:
         for prompt in prompts:
-            response = openai.Image.create(
-                prompt=prompt,
-                n=n,
-                size=size
-            )
+            response = openai.Image.create(prompt=prompt, n=n, size=size)
             if 'data' not in response or not isinstance(response['data'], list):
                 raise ValueError("Invalid response from OpenAI API.")
-            for data in response['data']:
-                image_urls.append(data['url'])
+            image_urls.extend(data['url'] for data in response['data'])
         return image_urls
     except Exception as e:
         raise Exception(f"Error generating images: {str(e)}")
 
-def download_or_read_image(image_path, file_name):
-    """Download or read an image from a local path or URL, convert to PNG format, and return the kebab filename and image buffer."""
+def download_or_read_image(image_path):
+    """Download or read an image from a local path or URL, convert to PNG format."""
     try:
         if image_path.startswith(('http://', 'https://')):
             response = requests.get(image_path)
@@ -63,12 +59,7 @@ def download_or_read_image(image_path, file_name):
             img = Image.open(image_path)
 
         img_converted = img.convert("RGBA")
-        kebab_file_name = convert_to_kebab_case(file_name)
-        img_buffer = BytesIO()
-        img_converted.save(img_buffer, format="PNG")
-        img_buffer.seek(0)
-
-        return kebab_file_name, img_buffer
+        return img_converted
     except Exception as e:
         raise Exception(f"Failed to download or process image: {str(e)}")
 
@@ -83,9 +74,12 @@ def create_zip_and_upload_to_s3(image_paths, uploaded_images):
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
             # Process generated images
             for idx, image_path in enumerate(image_paths):
-                image_name = f"generated_image_{idx + 1}"
-                kebab_file_name, image_buffer = download_or_read_image(image_path, image_name)
-                zf.writestr(f"static/img/{kebab_file_name}.png", image_buffer.getvalue())
+                img_converted = download_or_read_image(image_path)
+                kebab_file_name = convert_to_kebab_case(f"generated_image_{idx + 1}")
+                img_buffer = BytesIO()
+                img_converted.save(img_buffer, format="PNG")
+                img_buffer.seek(0)
+                zf.writestr(f"static/img/{kebab_file_name}.png", img_buffer.getvalue())
 
             # Process uploaded images
             for uploaded_image in uploaded_images:
@@ -105,33 +99,21 @@ def create_zip_and_upload_to_s3(image_paths, uploaded_images):
 def index():
     """Render the index page or handle data submission."""
     if request.method == 'POST':
-        # フロントエンドからのPOSTリクエストでcompany_infoを受け取る
         data = request.json
         company_info = data.get('company_info', {})
         sections = data.get('sections', [])
-
         return render_template('index.html', company_info=company_info, sections=sections)
 
-    # GETリクエストの場合は、デフォルトの会社情報を表示
+    # デフォルトの会社情報を表示
     default_company_info = {
-        'name': 'Default Company',  # 会社名を設定
-        'description': 'This is a default description of the company.'  # 会社の説明を設定
+        'name': 'Default Company',
+        'description': 'This is a default description of the company.'
     }
     default_sections = [
-        {
-            'title': 'Our Mission',
-            'content': 'To provide the best services to our customers.'
-        },
-        {
-            'title': 'Our Vision',
-            'content': 'To be the leading provider in our industry.'
-        },
-        {
-            'title': 'Our Values',
-            'content': 'Integrity, Customer Focus, Innovation.'
-        }
+        {'title': 'Our Mission', 'content': 'To provide the best services to our customers.'},
+        {'title': 'Our Vision', 'content': 'To be the leading provider in our industry.'},
+        {'title': 'Our Values', 'content': 'Integrity, Customer Focus, Innovation.'}
     ]
-
     return render_template('index.html', company_info=default_company_info, sections=default_sections)
 
 @app.route('/create_zip', methods=['POST'])
@@ -150,7 +132,6 @@ def create_zip_from_prompts():
         image_urls = generate_images_from_prompts(prompts, n=n_images, size=size)
         s3_url = create_zip_and_upload_to_s3(image_urls, uploaded_images)
         return jsonify({'s3_url': s3_url})
-
     except Exception as e:
         return jsonify({'error': f"Failed to create ZIP file: {str(e)}"}), 500
 
