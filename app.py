@@ -1,6 +1,6 @@
 import os
 import zipfile
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file
 from io import BytesIO
 from PIL import Image
 import boto3
@@ -13,37 +13,30 @@ from marshmallow import Schema, fields, ValidationError
 app = Flask(__name__)
 
 # Celeryの設定
-app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'  # Redisを使用
+app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'
 app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
 celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
 celery.conf.update(app.config)
 
-# 環境変数から設定
+# OpenAI APIキー設定
 openai.api_key = os.getenv('OPENAI_API_KEY')
 if not openai.api_key:
     raise EnvironmentError("OPENAI_API_KEY is not set in environment variables.")
 
-# S3クライアントの設定
+# S3設定
 s3 = boto3.client(
     's3',
     aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
     aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS'),
     region_name=os.getenv('AWS_REGION')
 )
-if not all([os.getenv('AWS_ACCESS_KEY_ID'), os.getenv('AWS_SECRET_ACCESS'), os.getenv('AWS_REGION')]):
-    raise EnvironmentError("AWS credentials are not set in environment variables.")
-
 S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME')
-if not S3_BUCKET_NAME:
-    raise EnvironmentError("S3_BUCKET_NAME is not set in environment variables.")
 
 def convert_to_kebab_case(text, max_length=15):
-    """Convert a given text to kebab-case with a maximum length."""
-    text = re.sub(r'[^a-zA-Z0-9\s]', '', text)  # Remove special characters
-    text = re.sub(r'[\s_]+', '-', text)  # Replace spaces and underscores with hyphens
-    return text.lower()[:max_length]  # Limit to 15 characters
+    text = re.sub(r'[^a-zA-Z0-9\s]', '', text)  # 特殊文字を削除
+    text = re.sub(r'[\s_]+', '-', text)  # スペースやアンダースコアをハイフンに変換
+    return text.lower()[:max_length]  # ケバブケース化して15文字に制限
 
-# スキーマの定義
 class FrontendFilesSchema(Schema):
     html = fields.Str(required=True)
     css = fields.Str(required=True)
@@ -63,11 +56,9 @@ class GenerateImagesSchema(Schema):
 
 @celery.task
 def generate_images_task(prompts, n_images):
-    """Background task to generate images from prompts."""
     return generate_images_from_prompts(prompts, n=n_images)
 
 def generate_images_from_prompts(prompts, n=1, size="1024x1024"):
-    """Generate images from a list of prompts using OpenAI's DALL·E."""
     image_urls = []
     try:
         for prompt in prompts:
@@ -79,47 +70,32 @@ def generate_images_from_prompts(prompts, n=1, size="1024x1024"):
     except Exception as e:
         raise Exception(f"Error generating images: {str(e)}")
 
-def download_or_read_image(image_path):
-    """Download or read an image from a local path or URL, convert to PNG format."""
-    try:
-        if image_path.startswith(('http://', 'https://')):
-            response = requests.get(image_path)
-            response.raise_for_status()
-            img = Image.open(BytesIO(response.content))
-        else:
-            img = Image.open(image_path)
-
-        img_converted = img.convert("RGBA")
-        return img_converted
-    except Exception as e:
-        raise Exception(f"Failed to download or process image: {str(e)}")
-
-def create_zip_and_upload_to_s3(image_paths, uploaded_images):
-    """Create a ZIP file from a list of image paths and upload it to S3."""
-    total_images = len(image_paths) + len(uploaded_images)
-    if total_images < 0 or total_images > 10:
-        raise ValueError("The total number of images (generated + uploaded) should be between 0 and 10.")
-
+def create_zip_and_upload_to_s3(image_urls, frontend_files, company_info):
     zip_buffer = BytesIO()
     try:
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            # Process generated images
-            for idx, image_path in enumerate(image_paths):
-                img_converted = download_or_read_image(image_path)
-                kebab_file_name = convert_to_kebab_case(f"generated_image_{idx + 1}")
+            # 生成された画像を追加
+            for idx, url in enumerate(image_urls):
+                response = requests.get(url)
+                img = Image.open(BytesIO(response.content))
+                kebab_file_name = convert_to_kebab_case(f"generated_image_{idx+1}")
                 img_buffer = BytesIO()
-                img_converted.save(img_buffer, format="PNG")
+                img.save(img_buffer, format="PNG")
                 img_buffer.seek(0)
                 zf.writestr(f"static/img/{kebab_file_name}.png", img_buffer.getvalue())
 
-            # Process uploaded images
-            for uploaded_image in uploaded_images:
-                filename = convert_to_kebab_case(uploaded_image.filename)
-                img_buffer = BytesIO(uploaded_image.read())
-                zf.writestr(f"static/img/{filename}", img_buffer.getvalue())
+            # フロントエンドファイルを追加
+            zf.writestr("index.html", frontend_files['html'])
+            zf.writestr("static/css/styles.css", frontend_files['css'])
+            zf.writestr("static/js/scripts.js", frontend_files['js'])
+            zf.writestr("static/php/functions.php", frontend_files['php'])
+
+            # 会社情報ファイルを追加
+            company_info_str = f"Company Name: {company_info['name']}\nDescription: {company_info['description']}"
+            zf.writestr("company_info.txt", company_info_str)
 
         zip_buffer.seek(0)
-        s3_file_name = "images.zip"
+        s3_file_name = "project.zip"
         s3.upload_fileobj(zip_buffer, S3_BUCKET_NAME, s3_file_name)
 
         return f"s3://{S3_BUCKET_NAME}/{s3_file_name}"
@@ -149,7 +125,20 @@ def index():
 
 @app.route('/generate_images', methods=['POST'])
 def generate_images():
-    """API endpoint to generate images from prompts."""
+    json_data = request.get_json()
+    
+    # バリデーション
+    try:
+        data = GenerateImagesSchema().load(json_data)
+    except ValidationError as err:
+        return jsonify(err.messages), 400
+
+    # 画像生成処理の非同期実行
+    task = generate_images_task.delay(data['prompts'], data['n_images'])
+    return jsonify({"task_id": task.id, "status": "Image generation in progress."}), 202
+
+@app.route('/create_zip', methods=['POST'])
+def create_zip():
     json_data = request.get_json()
 
     # バリデーション
@@ -158,48 +147,14 @@ def generate_images():
     except ValidationError as err:
         return jsonify(err.messages), 400
 
-    # 非同期に画像生成を実行
-    task = generate_images_task.delay(data['prompts'], data['n_images'])
-    return jsonify({"task_id": task.id, "status": "Image generation in progress."}), 202
-
-@app.route('/create_zip', methods=['POST'])
-def create_zip_from_prompts():
-    """API endpoint to create a ZIP file from image prompts."""
-    json_data = request.json
-
-    # バリデーション
     try:
-        data = GenerateImagesSchema().load(json_data)
-    except ValidationError as err:
-        return jsonify(err.messages), 400
-
-    try:
+        # 画像生成
         image_urls = generate_images_from_prompts(data['prompts'], n=data['n_images'])
-        s3_url = create_zip_and_upload_to_s3(image_urls, request.files.getlist('uploaded_images'))
+        # ZIPファイルを作成してS3にアップロード
+        s3_url = create_zip_and_upload_to_s3(image_urls, data['frontend_files'], data['company_info'])
         return jsonify({'s3_url': s3_url})
     except Exception as e:
         return jsonify({'error': f"Failed to create ZIP file: {str(e)}"}), 500
-
-@app.route('/download_project', methods=['GET'])
-def download_project():
-    """API endpoint to download the project structure as a ZIP file."""
-    zip_buffer = BytesIO()
-    try:
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-            # Add static reset.css
-            zf.writestr("static/css/reset.css", open('static/css/reset.css').read())
-            # Add the generated styles.css and index.html
-            zf.writestr("static/css/styles.css", open('static/css/styles.css').read())
-            zf.writestr("index.html", open('index.html').read())  # フロントエンドからのindex.htmlを使用
-            # Create empty directories for PHP and JS
-            zf.writestr("static/js/.gitkeep", "")  # Placeholder for the JS folder
-            zf.writestr("static/php/.gitkeep", "")  # Placeholder for the PHP folder
-            zf.writestr("static/img/placeholder.png", "Placeholder for images")  # Example placeholder
-
-        zip_buffer.seek(0)
-        return send_file(zip_buffer, as_attachment=True, download_name="project_structure.zip")
-    except Exception as e:
-        return jsonify({'error': f"Failed to create project ZIP file: {str(e)}"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
