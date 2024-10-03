@@ -7,8 +7,16 @@ import boto3
 import re
 import requests
 import openai
+from celery import Celery
+from marshmallow import Schema, fields, ValidationError
 
 app = Flask(__name__)
+
+# Celeryの設定
+app.config['CELERY_BROKER_URL'] = 'redis://localhost:6379/0'  # Redisを使用
+app.config['CELERY_RESULT_BACKEND'] = 'redis://localhost:6379/0'
+celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
+celery.conf.update(app.config)
 
 # 環境変数から設定
 openai.api_key = os.getenv('OPENAI_API_KEY')
@@ -35,7 +43,29 @@ def convert_to_kebab_case(text, max_length=15):
     text = re.sub(r'[\s_]+', '-', text)  # Replace spaces and underscores with hyphens
     return text.lower()[:max_length]  # Limit to 15 characters
 
-@app.route('/generate_images', methods=['POST'])
+# スキーマの定義
+class FrontendFilesSchema(Schema):
+    html = fields.Str(required=True)
+    css = fields.Str(required=True)
+    js = fields.Str(required=True)
+    php = fields.Str(required=True)
+
+class CompanyInfoSchema(Schema):
+    name = fields.Str(required=True)
+    description = fields.Str(required=True)
+
+class GenerateImagesSchema(Schema):
+    prompts = fields.List(fields.Str(), required=True, validate=lambda p: len(p) <= 10)
+    external_server_url = fields.Str(required=True)
+    n_images = fields.Int(required=False, validate=lambda n: 0 <= n <= 10, default=1)
+    frontend_files = fields.Nested(FrontendFilesSchema, required=True)
+    company_info = fields.Nested(CompanyInfoSchema, required=True)
+
+@celery.task
+def generate_images_task(prompts, n_images):
+    """Background task to generate images from prompts."""
+    return generate_images_from_prompts(prompts, n=n_images)
+
 def generate_images_from_prompts(prompts, n=1, size="1024x1024"):
     """Generate images from a list of prompts using OpenAI's DALL·E."""
     image_urls = []
@@ -117,21 +147,35 @@ def index():
     ]
     return render_template('index.html', company_info=default_company_info, sections=default_sections)
 
+@app.route('/generate_images', methods=['POST'])
+def generate_images():
+    """API endpoint to generate images from prompts."""
+    json_data = request.get_json()
+
+    # バリデーション
+    try:
+        data = GenerateImagesSchema().load(json_data)
+    except ValidationError as err:
+        return jsonify(err.messages), 400
+
+    # 非同期に画像生成を実行
+    task = generate_images_task.delay(data['prompts'], data['n_images'])
+    return jsonify({"task_id": task.id, "status": "Image generation in progress."}), 202
+
 @app.route('/create_zip', methods=['POST'])
 def create_zip_from_prompts():
     """API endpoint to create a ZIP file from image prompts."""
-    data = request.json
-    prompts = data.get('prompts', [])
-    n_images = data.get('n_images', 1)
-    size = data.get('size', '1024x1024')
-    uploaded_images = request.files.getlist('uploaded_images')
+    json_data = request.json
 
-    if not prompts or not isinstance(prompts, list):
-        return jsonify({'error': 'No prompts provided or invalid format'}), 400
+    # バリデーション
+    try:
+        data = GenerateImagesSchema().load(json_data)
+    except ValidationError as err:
+        return jsonify(err.messages), 400
 
     try:
-        image_urls = generate_images_from_prompts(prompts, n=n_images, size=size)
-        s3_url = create_zip_and_upload_to_s3(image_urls, uploaded_images)
+        image_urls = generate_images_from_prompts(data['prompts'], n=data['n_images'])
+        s3_url = create_zip_and_upload_to_s3(image_urls, request.files.getlist('uploaded_images'))
         return jsonify({'s3_url': s3_url})
     except Exception as e:
         return jsonify({'error': f"Failed to create ZIP file: {str(e)}"}), 500
