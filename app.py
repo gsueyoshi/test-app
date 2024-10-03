@@ -35,6 +35,7 @@ def convert_to_kebab_case(text, max_length=15):
     text = re.sub(r'[\s_]+', '-', text)  # Replace spaces and underscores with hyphens
     return text.lower()[:max_length]  # Limit to 15 characters
 
+@app.route('/generate_images', methods=['POST'])
 def generate_images_from_prompts(prompts, n=1, size="1024x1024"):
     """Generate images from a list of prompts using OpenAI's DALL·E."""
     image_urls = []
