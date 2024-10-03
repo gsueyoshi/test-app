@@ -164,7 +164,7 @@ def download_project():
             zf.writestr("static/css/reset.css", open('static/css/reset.css').read())
             # Add the generated styles.css and index.html
             zf.writestr("static/css/styles.css", open('static/css/styles.css').read())
-            zf.writestr("templates/index.html", open('templates/index.html').read())
+            zf.writestr("index.html", open('index.html').read())  # フロントエンドからのindex.htmlを使用
             # Create empty directories for PHP and JS
             zf.writestr("static/js/.gitkeep", "")  # Placeholder for the JS folder
             zf.writestr("static/php/.gitkeep", "")  # Placeholder for the PHP folder
