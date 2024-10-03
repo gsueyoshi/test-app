@@ -101,10 +101,38 @@ def create_zip_and_upload_to_s3(image_paths, uploaded_images):
     except Exception as e:
         raise Exception(f"Error creating ZIP file: {str(e)}")
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def index():
-    """Render the index page."""
-    return render_template('index.html')
+    """Render the index page or handle data submission."""
+    if request.method == 'POST':
+        # フロントエンドからのPOSTリクエストでcompany_infoを受け取る
+        data = request.json
+        company_info = data.get('company_info', {})
+        sections = data.get('sections', [])
+
+        return render_template('index.html', company_info=company_info, sections=sections)
+
+    # GETリクエストの場合は、デフォルトの会社情報を表示
+    default_company_info = {
+        'name': 'Default Company',  # 会社名を設定
+        'description': 'This is a default description of the company.'  # 会社の説明を設定
+    }
+    default_sections = [
+        {
+            'title': 'Our Mission',
+            'content': 'To provide the best services to our customers.'
+        },
+        {
+            'title': 'Our Vision',
+            'content': 'To be the leading provider in our industry.'
+        },
+        {
+            'title': 'Our Values',
+            'content': 'Integrity, Customer Focus, Innovation.'
+        }
+    ]
+
+    return render_template('index.html', company_info=default_company_info, sections=default_sections)
 
 @app.route('/create_zip', methods=['POST'])
 def create_zip_from_prompts():
