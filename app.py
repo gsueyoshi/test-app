@@ -137,6 +137,9 @@ def download_project():
             # Add the generated styles.css and index.html
             zf.writestr("static/css/styles.css", open('static/css/styles.css').read())
             zf.writestr("templates/index.html", open('templates/index.html').read())
+            # Create empty directories for PHP and JS
+            zf.writestr("static/js/.gitkeep", "")  # Placeholder for the JS folder
+            zf.writestr("static/php/.gitkeep", "")  # Placeholder for the PHP folder
             zf.writestr("static/img/placeholder.png", "Placeholder for images")  # Example placeholder
 
         zip_buffer.seek(0)
