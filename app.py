@@ -1,5 +1,6 @@
 import os
 import zipfile
+import time  # 待機時間を追加するために必要
 from flask import Flask, request, jsonify, send_file, render_template
 from io import BytesIO
 from PIL import Image
@@ -56,19 +57,26 @@ class GenerateImagesSchema(Schema):
 
 @celery.task
 def generate_images_task(prompts, n_images):
+    """非同期で画像を生成するためのタスク"""
     return generate_images_from_prompts(prompts, n=n_images)
 
-def generate_images_from_prompts(prompts, n=1, size="1024x1024"):
+def generate_images_from_prompts(prompts, n=1, size="1024x1024", batch_size=2, delay=3):
+    """バッチ処理で画像を生成し、速度制限を回避"""
     image_urls = []
-    try:
-        for prompt in prompts:
-            response = openai.Image.create(prompt=prompt, n=n, size=size)
-            if 'data' not in response or not isinstance(response['data'], list):
-                raise ValueError("Invalid response from OpenAI API.")
-            image_urls.extend(data['url'] for data in response['data'])
-        return image_urls
-    except Exception as e:
-        raise Exception(f"Error generating images: {str(e)}")
+    for i in range(0, len(prompts), batch_size):
+        batch_prompts = prompts[i:i+batch_size]
+        try:
+            for prompt in batch_prompts:
+                response = openai.Image.create(prompt=prompt, n=n, size=size)
+                if 'data' not in response or not isinstance(response['data'], list):
+                    raise ValueError("Invalid response from OpenAI API.")
+                image_urls.extend(data['url'] for data in response['data'])
+            
+            # バッチ処理後に待機時間を挿入（3秒）
+            time.sleep(delay)
+        except Exception as e:
+            raise Exception(f"Error generating images in batch: {str(e)}")
+    return image_urls
 
 def create_zip_and_upload_to_s3(image_urls, frontend_files, company_info):
     """Create a ZIP file from a list of image paths and upload it to S3, ensuring the same file names are used in HTML and the ZIP."""
