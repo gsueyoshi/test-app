@@ -34,9 +34,10 @@ s3 = boto3.client(
 S3_BUCKET_NAME = os.getenv('S3_BUCKET_NAME')
 
 def convert_to_kebab_case(text, max_length=15):
+    """文字列をケバブケースに変換して最大長を15文字に制限"""
     text = re.sub(r'[^a-zA-Z0-9\s]', '', text)  # 特殊文字を削除
     text = re.sub(r'[\s_]+', '-', text)  # スペースやアンダースコアをハイフンに変換
-    return text.lower()[:max_length]  # ケバブケース化して15文字に制限
+    return text.lower()[:max_length]
 
 class FrontendFilesSchema(Schema):
     html = fields.Str(required=True)
@@ -60,26 +61,29 @@ def generate_images_task(prompts, n_images):
     """非同期で画像を生成するためのタスク"""
     return generate_images_from_prompts(prompts, n=n_images)
 
-def generate_images_from_prompts(prompts, n=1, size="1024x1024", batch_size=2, delay=3):
-    """バッチ処理で画像を生成し、速度制限を回避"""
+def generate_images_from_prompts(prompts, n=1, size="1024x1024", batch_size=2, delay=3, timeout=120, retries=3):
+    """バッチ処理で画像を生成し、タイムアウトとリトライを設定"""
     image_urls = []
     for i in range(0, len(prompts), batch_size):
-        batch_prompts = prompts[i:i+batch_size]
-        try:
-            for prompt in batch_prompts:
-                response = openai.Image.create(prompt=prompt, n=n, size=size)
-                if 'data' not in response or not isinstance(response['data'], list):
-                    raise ValueError("Invalid response from OpenAI API.")
-                image_urls.extend(data['url'] for data in response['data'])
-            
-            # バッチ処理後に待機時間を挿入（3秒）
-            time.sleep(delay)
-        except Exception as e:
-            raise Exception(f"Error generating images in batch: {str(e)}")
+        batch_prompts = prompts[i:i + batch_size]
+        for attempt in range(retries):
+            try:
+                for prompt in batch_prompts:
+                    response = openai.Image.create(prompt=prompt, n=n, size=size, timeout=timeout)
+                    if 'data' not in response or not isinstance(response['data'], list):
+                        raise ValueError("Invalid response from OpenAI API.")
+                    image_urls.extend(data['url'] for data in response['data'])
+                break  # 成功したらループを抜ける
+            except Exception as e:
+                print(f"Error: {e}, Retrying... {attempt+1}/{retries}")
+                time.sleep(delay * (attempt + 1))  # エラー発生時にバックオフで待機
+        else:
+            raise Exception("Max retries reached. Failed to generate images.")
+        time.sleep(delay)  # バッチ処理後の待機時間
     return image_urls
 
 def create_zip_and_upload_to_s3(image_urls, frontend_files, company_info):
-    """Create a ZIP file from a list of image paths and upload it to S3, ensuring the same file names are used in HTML and the ZIP."""
+    """画像とフロントエンドファイルをまとめてZIPにし、S3にアップロード"""
     zip_buffer = BytesIO()
     image_filenames = []  # 画像ファイル名を保存するリスト
     try:
