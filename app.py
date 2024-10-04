@@ -61,7 +61,7 @@ def generate_images_task(prompts, n_images):
     """非同期で画像を生成するためのタスク"""
     return generate_images_from_prompts(prompts, n=n_images)
 
-def generate_images_from_prompts(prompts, n=1, size="1024x1024", batch_size=2, delay=3, timeout=120, retries=3):
+def generate_images_from_prompts(prompts, n=1, size="1024x1024", batch_size=1, delay=5, timeout=120, retries=3):
     """バッチ処理で画像を生成し、タイムアウトとリトライを設定"""
     image_urls = []
     for i in range(0, len(prompts), batch_size):
